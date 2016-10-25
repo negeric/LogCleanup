@@ -1,0 +1,57 @@
+﻿<?xml version="1.0" encoding="utf-8" ?>
+<!--
+  This file contains the path to search for log files along with other options
+  <name> 
+    A name that can be referenced by using the -n flag.  By specifying a name,
+    The application will only run against the location attached to that name.
+    If left blank, the Application will run against each <path> item
+   </name>
+   <location>
+    Path to log file directory.  The application will search this directory 
+    and match files based on the <extensions> attribute
+   </location>
+   <extensions>
+    A list of Extensions to search for.  Any file not matching this list will
+    be ignored
+   </extensions>
+   <archiveDays>
+    Program will archive files older than this value.  Must be numeric
+    Uses > not >=
+   </archiveDays>
+   <deleteArchiveDays>
+    Program will delete archives older than this value.  Must be numeric
+    Leave blank to skip deleting archives
+    Uses > not >=
+   </deleteArchiveDays>
+   <archiveDirectory>
+    Specify a directory to place the zip archives.
+    Defaults to <location> path
+   </archiveDirectory>
+   <recursive>
+    True - Program will perform a recursive search in <location>
+    False - Program will not enumerator child directories
+    Defaults to False
+   </recursive>
+   <deleteOriginal>
+    True - Deletes files that are placed in an archive
+    False - Leaves original files in place
+    Defaults to true
+   </deleteOriginal>
+   <dryRun>
+    Simply log the files that would be archived and deleted
+    Do not actually archive or delete files/Archives
+   </dryRun>
+-->
+<paths>
+  <path>
+    <name>Test</name>
+    <location>C:\admin\logs\</location>
+    <extensions>.log,.txt</extensions>
+    <archiveDays>3</archiveDays>
+    <deleteArchiveDays>45</deleteArchiveDays>
+    <archiveDirectory>Archive</archiveDirectory>
+    <recursive>true</recursive>
+    <deleteOriginal>false</deleteOriginal>
+    <dryRun>false</dryRun>
+  </path>
+</paths>
