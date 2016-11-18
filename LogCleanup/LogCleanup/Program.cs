@@ -10,6 +10,7 @@ using System.Xml.Linq;
 using System.IO;
 using System.Diagnostics;
 using Ionic.Zip;
+using System.Runtime.InteropServices;
 
 namespace LogCleanup
 {
@@ -18,6 +19,15 @@ namespace LogCleanup
     // <summary>Log file cleanup utility</summary>
     class Program
     {
+        //Setup window properties to allow us to hide the console
+        [DllImport("kernel32.dll")]
+        static extern IntPtr GetConsoleWindow();
+
+        [DllImport("user32.dll")]
+        static extern bool ShowWindow(IntPtr hWnd, int nCmdShow);
+
+        const int SW_HIDE = 0;
+        const int SW_SHOW = 5;
         private static readonly log4net.ILog log = log4net.LogManager.GetLogger(System.Reflection.MethodBase.GetCurrentMethod().DeclaringType);
         //Using CommandLine from https://commandline.codeplex.com/
         class Options
@@ -25,7 +35,9 @@ namespace LogCleanup
             [Option('n',"name", Required = false, HelpText = "Specify a directory configuration by Name, will only run a path that matches this name")]
             public string strName { get; set; }
             [Option('d', "debug", Required = false, HelpText = "Enable debug output to console window.")]
-            public bool bDebug { get; set; }                  
+            public bool bDebug { get; set; }       
+            [Option('s',"showDialog", Required = false, HelpText = "Show Console dialog, enabled by default when debug flag is set")]         
+            public bool bShowDialog { get; set; }  
             [ParserState]
             public IParserState LastParserState { get; set; }
             [HelpOption]
@@ -37,6 +49,7 @@ namespace LogCleanup
         //Setup static working variables       
         private static string strName; 
         private static bool bDebug;
+        private static bool bShowDialog;
         private static bool bRecursive;
         private static int iAccessDenied;
         private static int iArchivedCount;
@@ -53,133 +66,154 @@ namespace LogCleanup
             if (Parser.Default.ParseArguments(args, options))
             {                
                 bDebug = options.bDebug;
-                strName = options.strName;               
+                strName = options.strName;
+                //Show dialog if -s --showDialog or -d --debug flags are set
+                bShowDialog = (bDebug || options.bShowDialog) ? true : false;
             }
-            debug("Starting Log Cleanup", "info");                   
+            if (!bShowDialog)
+            {
+                hideWindow();
+                debug("Hiding console window", "info");
+            }
+            debug("Starting Log Cleanup", "info");        
             parseXml();           
+        }
+        private static void hideWindow()
+        {
+            var handle = GetConsoleWindow();
+            ShowWindow(handle, SW_HIDE);
         }
         private static void parseXml()
         {
             //Start a new timer.  If debug is enabled, the elapsed time will be displayed
             var timer = Stopwatch.StartNew();
-            timer.Start();            
-            string xmlPath = @"config\paths.xml";
-            XDocument doc = XDocument.Load(xmlPath);
-            var p = from element in doc.Elements("paths").Elements("path") select element;
-            //IEnumerable<XElement> p = doc.Elements();
-            foreach (var t in p)
+            timer.Start();
+            try
             {
-                //Check if a name was specified
-                bool bContinue = false;
-                if (!String.IsNullOrEmpty(strName))
+                string xmlPath = System.AppDomain.CurrentDomain.BaseDirectory + @"\config\paths.xml";
+                XDocument doc = XDocument.Load(xmlPath);
+                var p = from element in doc.Elements("paths").Elements("path") select element;
+                //IEnumerable<XElement> p = doc.Elements();
+                foreach (var t in p)
                 {
-                    if (t.Element("name").Value.ToString().ToLower() != strName)
-                        bContinue = true;
-                    else
-                        debug("Matched a path node by name " + strName, "info");
-                }
-                if (bContinue)
-                    continue;
-                try
-                {
-                    debug("Location: " + t.Element("location").Value, "info");
-                    debug("File Extensions: " + t.Element("extensions").Value, "info");
-                    debug("Archive Days: " + t.Element("archiveDays").Value, "info");
-                    debug("Delete Archive Days: " + t.Element("deleteArchiveDays").Value, "info");
-                    //Check if params are valid
-                    if (validParams(t.Element("location").Value, t.Element("archiveDays").Value))
+                    //Check if a name was specified
+                    bool bContinue = false;
+                    if (!String.IsNullOrEmpty(strName))
                     {
-                        //Valid get files older than day
-                        string location = t.Element("location").Value;
-                        int archiveDays = Convert.ToInt32(t.Element("archiveDays").Value);                        
-                        bool dryRun = (!String.IsNullOrEmpty(t.Element("dryRun").Value) && t.Element("dryRun").Value.ToLower() == "false") ? false : true;
-                        bool deleteOriginal = (!String.IsNullOrEmpty(t.Element("deleteOriginal").Value) && t.Element("deleteOriginal").Value.ToLower() == "false") ? false : true;
-                        string archiveDirectory = (!String.IsNullOrEmpty(t.Element("archiveDirectory").Value)) ? t.Element("archiveDirectory").Value : null;
-                        bRecursive = (!String.IsNullOrEmpty(t.Element("recursive").Value) && t.Element("recursive").Value.ToLower() == "true") ? true : false;
-                        if (dryRun)
-                            debug("Dry Run! Files/Archives will not be deleted.  Change <dryRun>false</dryRun> to true", "info");
-                        strIncludeExtension = t.Element("extensions").Value;                        
-                        //Check filter file extensions
-                        bool fileExtensionFilter = false;
-                        //Create a blank list to hold the filtered file extensions
-                        filterExtension = new List<string>();
-                        //Check if 1-exclude flag was set and contains paths
-                        if (!String.IsNullOrEmpty(strIncludeExtension))
+                        if (t.Element("name").Value.ToString().ToLower() != strName.ToLower())
+                            bContinue = true;
+                        else
+                            debug("Matched a path node by name " + strName, "info");
+                    }
+                    if (bContinue)
+                        continue;
+                    try
+                    {
+                        debug("Location: " + t.Element("location").Value, "info");
+                        debug("File Extensions: " + t.Element("extensions").Value, "info");
+                        debug("Archive Days: " + t.Element("archiveDays").Value, "info");
+                        debug("Delete Archive Days: " + t.Element("deleteArchiveDays").Value, "info");
+                        //Check if params are valid
+                        if (validParams(t.Element("location").Value, t.Element("archiveDays").Value))
                         {
-                            //Set fileExtensionFilter to true so we don't run code if there are no filters
-                            fileExtensionFilter = true;
-                                                      
-                            //Check if multiple extensions were specified
-                            if (strIncludeExtension.Contains(','))
+                            //Valid get files older than day
+                            string location = t.Element("location").Value;
+                            int archiveDays = Convert.ToInt32(t.Element("archiveDays").Value);
+                            bool dryRun = (!String.IsNullOrEmpty(t.Element("dryRun").Value) && t.Element("dryRun").Value.ToLower() == "false") ? false : true;
+                            bool deleteOriginal = (!String.IsNullOrEmpty(t.Element("deleteOriginal").Value) && t.Element("deleteOriginal").Value.ToLower() == "false") ? false : true;
+                            string archiveDirectory = (!String.IsNullOrEmpty(t.Element("archiveDirectory").Value)) ? t.Element("archiveDirectory").Value : null;
+                            bRecursive = (!String.IsNullOrEmpty(t.Element("recursive").Value) && t.Element("recursive").Value.ToLower() == "true") ? true : false;
+                            if (dryRun)
+                                debug("Dry Run! Files/Archives will not be deleted.  Change <dryRun>false</dryRun> to true", "info");
+                            strIncludeExtension = t.Element("extensions").Value;
+                            //Check filter file extensions
+                            bool fileExtensionFilter = false;
+                            //Create a blank list to hold the filtered file extensions
+                            filterExtension = new List<string>();
+                            //Check if 1-exclude flag was set and contains paths
+                            if (!String.IsNullOrEmpty(strIncludeExtension))
                             {
-                                //Multiple extensions were provided, expand to array
-                                foreach (string tmpExt in strIncludeExtension.Split(','))
+                                //Set fileExtensionFilter to true so we don't run code if there are no filters
+                                fileExtensionFilter = true;
+
+                                //Check if multiple extensions were specified
+                                if (strIncludeExtension.Contains(','))
+                                {
+                                    //Multiple extensions were provided, expand to array
+                                    foreach (string tmpExt in strIncludeExtension.Split(','))
+                                    {
+                                        //Check if the user added a . before the extension, if not, add it
+                                        if (tmpExt.Substring(0, 1) != ".")
+                                        {
+                                            filterExtension.Add("." + tmpExt);
+                                            debug("Added new filter: ." + tmpExt, "info");
+                                        }
+                                        else
+                                        {
+                                            filterExtension.Add(tmpExt);
+                                            debug("Added new filter: " + tmpExt, "info");
+                                        }
+                                    }
+                                }
+                                else //Single file extension provided
                                 {
                                     //Check if the user added a . before the extension, if not, add it
-                                    if (tmpExt.Substring(0, 1) != ".")
+                                    if (strIncludeExtension.Substring(0, 1) != ".")
                                     {
-                                        filterExtension.Add("." + tmpExt);
-                                        debug("Added new filter: ." + tmpExt, "info");
+                                        filterExtension.Add("." + strIncludeExtension);
+                                        debug("Added new filter: ." + strIncludeExtension, "info");
                                     }
                                     else
                                     {
-                                        filterExtension.Add(tmpExt);
-                                        debug("Added new filter: " + tmpExt, "info");
+                                        filterExtension.Add(strIncludeExtension);
+                                        debug("Added new filter: " + strIncludeExtension, "info");
                                     }
                                 }
                             }
-                            else //Single file extension provided
+                            //Get a list of files with the extension filter
+                            IList<string> files = new List<string>();
+                            files = GetFiles(location, files, archiveDays, fileExtensionFilter, filterExtension);
+                            //Loop through files
+
+                            foreach (string file in files)
                             {
-                                //Check if the user added a . before the extension, if not, add it
-                                if (strIncludeExtension.Substring(0, 1) != ".")
+                                DateTime cd = File.GetCreationTime(file);
+                                string archive = "Archive_" + cd.ToString("yyyy-MM-dd") + ".zip";
+                                addFileToArchive(file, archive, archiveDirectory, deleteOriginal, dryRun);
+                                iArchivedCount++;
+                            }
+                            //Delete Old archives       
+                            if (!String.IsNullOrEmpty(t.Element("deleteArchiveDays").Value))
+                            {
+                                int deleteArchiveDays;
+                                bool bDel = Int32.TryParse(t.Element("deleteArchiveDays").Value, out deleteArchiveDays);
+                                if (bDel)
                                 {
-                                    filterExtension.Add("." + strIncludeExtension);
-                                    debug("Added new filter: ." + strIncludeExtension, "info");
+                                    debug("Deleting archives older than " + deleteArchiveDays + " days", "info");
+                                    IList<string> archives = new List<string>();
+                                    DeleteArchives(location, archives, deleteArchiveDays, dryRun);
                                 }
                                 else
                                 {
-                                    filterExtension.Add(strIncludeExtension);
-                                    debug("Added new filter: " + strIncludeExtension, "info");
+                                    debug("Unable to parse <deleteArchiveDays> value, not a number", "info");
                                 }
                             }
+                            timer.Stop();
+                            debug("Archived " + iArchivedCount + " item(s) and deleted " + iArchivesDeletedCount + " archive(s) in " + timerDisplay(timer.ElapsedMilliseconds), "info");
                         }
-                        //Get a list of files with the extension filter
-                        IList<string> files = new List<string>();
-                        files = GetFiles(location, files, archiveDays, fileExtensionFilter, filterExtension);
-                        //Loop through files
-
-                        foreach (string file in files)
+                        else
                         {
-                            DateTime cd = File.GetCreationTime(file);
-                            string archive = "Archive_" + cd.ToString("yyyy-MM-dd") + ".zip";                            
-                            addFileToArchive(file, archive, archiveDirectory, deleteOriginal, dryRun);
-                            iArchivedCount++;               
+                            Console.WriteLine("Invalid parameters in configuration file", "info");
                         }
-                        //Delete Old archives       
-                        if (!String.IsNullOrEmpty(t.Element("deleteArchiveDays").Value))
-                        {
-                            int deleteArchiveDays;
-                            bool bDel = Int32.TryParse(t.Element("deleteArchiveDays").Value, out deleteArchiveDays);
-                            if (bDel)
-                            {
-                                debug("Deleting archives older than " + deleteArchiveDays + " days", "info");
-                                IList<string> archives = new List<string>();
-                                DeleteArchives(location, archives, deleteArchiveDays, dryRun);
-                            } else
-                            {
-                                debug("Unable to parse <deleteArchiveDays> value, not a number", "info");
-                            }
-                        }
-                        timer.Stop();
-                        debug("Archived " + iArchivedCount + " item(s) and deleted " + iArchivesDeletedCount + " archive(s) in " + timerDisplay(timer.ElapsedMilliseconds), "info");
-                    } else
-                    {
-                        Console.WriteLine("Invalid parameters in configuration file", "info");
                     }
-                } catch (Exception ex)
-                {
-                    debug("Error parsing XML Document " + ex.ToString(), "info");
+                    catch (Exception ex)
+                    {
+                        debug("Error parsing XML Document " + ex.ToString(), "info");
+                    }
                 }
+            } catch
+            {
+                debug("Error loading XML Document.  Ensure that " + System.AppDomain.CurrentDomain.BaseDirectory + "\\config\\paths.xml exists", "info");
             }       
         }
         //Validate paramaters
@@ -198,6 +232,8 @@ namespace LogCleanup
             //Check if the user specified an archiveDirectory in config file.  If so, append it to the local path of the log files
             archivePath = (!String.IsNullOrEmpty(archivePath)) ? Path.GetDirectoryName(file) + "\\" + archivePath : Path.GetDirectoryName(file);
             archive = archivePath + "\\" + archive;
+            if (!objExists(archivePath))            
+                Directory.CreateDirectory(archivePath);            
             if (dryRun)
                 debug("Dry Run, not modifying file " + file, "info");
             else
